@@ -1,0 +1,13 @@
+/pca1_vs_timepoints.npy
+/contours.npy
+/features.csv
+/space_shape_components.npy
+/space_shape_variance.npy
+/space_traj_components.npy
+/space_traj_variance.npy
+/Strain_with_trajectory_features.xlsx
+/trajectory_pca_elbow_plot.png
+/results_norm/
+/results_from_norm/
+/results/
+/.ipynb_checkpoints/
