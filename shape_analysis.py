@@ -1,23 +1,52 @@
+"""Align shapes and shape series using the Procrustes distance.
+
+In this context a shape is a tuple of landmark points in n-dimensional space.
+The Procrustes transformation is the Euclidean transformation (rotation, scaling and translation)
+that minimizes the Procrustes distance
+(the sum of squared differences between the landmark points) between the two shapes.
+Generalized Procrustes analysis is an iterative algorithm for aligning a set of shapes.
+Linear shift is an algorithm for aligning shape series. We can use linear shift to compare
+dynamical change of shape between different objects.
+
+Typical usage example:
+# shape_series_list (n_series, time, n_points, ndim) numpy array
+shapes = shape_series_list.reshape(-1, *shape_series_list.shape[2:])
+mean_shape, gpa_shapes = generalized_procrustes_analysis(shapes)
+ls_shape_series_list = linear_shift(shape_series_list, mean_shape)
+"""
 import numpy as np
 import skimage.transform
 
 
 def procrustes_analysis(shape, reference_shape, scale=True, translate=True):
+    """
+    Aligns one shape to another by a similarity transform
+    :param shape: (n_points,ndim Numpy array)
+        Shape to be aligned
+    :param reference_shape: (n_points,ndim Numpy array)
+        Shape is aligned to the reference shape
+    :param scale: bool, optional
+        Apply scaling in the transformation
+    :param translate: bool, optional
+        Apply translation in the transformation
+    :return:
+    transform: skimage.transform.GeometricTransform object
+        Transformation aligning shape to the refernce shape
+    transformed_shape: (n_points,ndim Numpy array)
+        Shape after applied transformation
+    """
     if scale:
-        ttype = 'similarity'
         transform = skimage.transform.SimilarityTransform()
     else:
-        ttype = 'euclidean'
         transform = skimage.transform.EuclideanTransform()
     transform.estimate(shape, reference_shape)
-    # transform = skimage.transform.estimate_transform(ttype, shape, reference_shape)
     if not translate:
-        shape_translated = skimage.transform.EuclideanTransform(translation=transform.translation)(shape)
-        # transform = skimage.transform.estimate_transform(ttype, shape_translated, reference_shape)
+        shape_translated = skimage.transform.EuclideanTransform(
+            translation=transform.translation
+        )(shape)
         transform.estimate(shape_translated, reference_shape)
     transformed_shape = transform(shape)
-    error = procrustes_distance(transformed_shape, reference_shape)
-    return transform, transform(shape)
+    return transform, transformed_shape
 
 
 def procrustes_distance(reference_shape, shape):
@@ -30,7 +59,9 @@ def procrustes_distance(reference_shape, shape):
     return dist
 
 
-def generalized_procrustes_analysis(shapes, scale=True, translate=True, rtol=1e-5, atol=1e-8, max_iter=1000):
+def generalized_procrustes_analysis(
+    shapes, scale=True, translate=True, rtol=1e-5, atol=1e-8, max_iter=1000
+):
     """
     Performs superimposition on a set of
     shapes, calculates a mean shape.
@@ -65,21 +96,20 @@ def generalized_procrustes_analysis(shapes, scale=True, translate=True, rtol=1e-
     new_shapes = np.zeros_like(shapes)
 
     for iter_id in range(max_iter):
-
         # add the mean shape as first element of array
         new_shapes[0] = mean_shape
 
         # superimpose all shapes to current mean
-        for sh in range(1, num_shapes):
+        for shape in range(1, num_shapes):
             try:
-                new_sh = shapes[sh]
+                new_sh = shapes[shape]
                 _, new_sh = procrustes_analysis(new_sh, mean_shape, scale, translate)
-                new_shapes[sh] = new_sh
-            except ValueError as f:
-                print(iter_id, sh)
+                new_shapes[shape] = new_sh
+            except ValueError as error:
+                print(iter_id, shape)
                 print(mean_shape, mean_shape.shape)
-                print(shapes[sh], shapes[sh].shape)
-                raise f
+                print(shapes[shape], shapes[shape].shape)
+                raise error
 
         # calculate new mean
         #         print(new_shapes.shape)
@@ -104,23 +134,43 @@ def generalized_procrustes_analysis(shapes, scale=True, translate=True, rtol=1e-
     return mean_shape, new_shapes
 
 
-def linear_shift(shape_series, global_mean, scale=True, rtol=1e-5, atol=1e-8, max_iter=1000):
+def linear_shift(
+    shape_series, global_mean, scale=True, rtol=1e-5, atol=1e-8, max_iter=1000
+):
+    """
+
+    :param shape_series:
+    :param global_mean:
+    :param scale:
+    :param rtol:
+    :param atol:
+    :param max_iter:
+    :return:
+    """
     local_gpas = [
-        generalized_procrustes_analysis(shapes, scale=scale, rtol=rtol, atol=atol, max_iter=max_iter)[0]
+        generalized_procrustes_analysis(
+            shapes, scale=scale, rtol=rtol, atol=atol, max_iter=max_iter
+        )[0]
         for shapes in shape_series
     ]
     local_gpas_aligned = [
         procrustes_analysis(lt, global_mean, scale=scale)[1] for lt in local_gpas
     ]
     linear_shifted = [
-        [procrustes_analysis(frame, local_gpas_aligned[i], scale=scale)[1] - local_gpas_aligned[i] + global_mean
-         for frame in shape_series[i]]
+        [
+            procrustes_analysis(frame, local_gpas_aligned[i], scale=scale)[1]
+            - local_gpas_aligned[i]
+            + global_mean
+            for frame in shape_series[i]
+        ]
         for i in range(len(shape_series))
     ]
     return np.array(linear_shifted)
 
 
-def linear_shift2(shape_series, global_mean, scale=True, rtol=1e-5, atol=1e-8, max_iter=1000):
+def linear_shift2(
+    shape_series, global_mean, scale=True, rtol=1e-5, atol=1e-8, max_iter=1000
+):
     """
     difference is that here we will not be scaling inside the cycle
     :param shape_series:
@@ -132,7 +182,9 @@ def linear_shift2(shape_series, global_mean, scale=True, rtol=1e-5, atol=1e-8, m
     :return:
     """
     local_gpas = [
-        generalized_procrustes_analysis(shapes, scale=False, rtol=rtol, atol=atol, max_iter=max_iter)[0]
+        generalized_procrustes_analysis(
+            shapes, scale=False, rtol=rtol, atol=atol, max_iter=max_iter
+        )[0]
         for shapes in shape_series
     ]
     alignments = []
@@ -143,8 +195,12 @@ def linear_shift2(shape_series, global_mean, scale=True, rtol=1e-5, atol=1e-8, m
         aligned_local_gpas.append(aligned_lt)
 
     linear_shifted = [
-        [alignments[i](procrustes_analysis(frame, local_gpas[i], scale=False)[1]) - aligned_local_gpas[i] + global_mean
-         for frame in shape_series[i]]
+        [
+            alignments[i](procrustes_analysis(frame, local_gpas[i], scale=False)[1])
+            - aligned_local_gpas[i]
+            + global_mean
+            for frame in shape_series[i]
+        ]
         for i in range(len(shape_series))
     ]
     return np.array(linear_shifted)
