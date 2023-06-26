@@ -247,20 +247,25 @@ def make_contour_angle_increasing(angle):
     return angle
 
 
-def convert_to_polar(contour_points_time):
+def convert_to_polar(contour_points_time, center=True):
     """
     Converts the LV heart cycle array to polar coordinates.
     We need to do it simultaneously for the whole cycle
     to be able to compare frames in the cycle by angle.
     :param contour_points_time: (time, n_points, 2)
-    :return:
+    :param center: bool (default is True)
+        If True every contour in the cycle is centered at the origin
+        otherwise, the translation differences between frames are left untouched
+    :return: (time, n_points, 2) float array
     """
-    ed_contour = contour_points_time[0]
+    if center:
+        contour_points_time_centered = contour_points_time - np.mean(contour_points_time, axis=1, keepdims=True)
+    ed_contour = contour_points_time_centered[0]
     _, phi_ed0 = car2pol([ed_contour[0]], [0, 0])
 
     rs = []
     phis = []
-    for frame in contour_points_time:
+    for frame in contour_points_time_centered:
         r, phi = car2pol(frame, [0, 0])
         rs.append(r)
         phi_increasing_normalized = make_contour_angle_increasing(phi) - phi_ed0
@@ -345,12 +350,12 @@ def get_regional_areas_time(contour_points_time_polar, n_regions):
     :return: (time, n_regions,) float array
         Area change in the LV regions
     """
-    region_angles = get_region_angles(contour_points_time_polar[0], n_regions)
+    region_angles = get_region_angles(contour_points_time_polar[0], n_regions + 2)
     regional_areas_time = []
     for frame in contour_points_time_polar:
         regional_areas = get_regional_areas(frame, region_angles)
         regional_areas_time.append(regional_areas)
-    regional_areas_time = np.array(regional_areas_time)
+    regional_areas_time = np.array(regional_areas_time)[:,1:-1]
     return regional_areas_time
 
 
@@ -366,7 +371,7 @@ def _get_local_ES(regional_areas_time):
     return np.argmin(regional_areas_time, axis=0)
 
 
-def get_local_ES(contour_points_time, n_regions=20):
+def get_local_ES(contour_points_time, n_regions=20, center=True):
     """
     Finds the local end-systoles (ES) in the LV regions.
     Local ES is defined as the id of the frame with minimal area for the particular region.
@@ -374,9 +379,12 @@ def get_local_ES(contour_points_time, n_regions=20):
       LV shape dynamics
     :param n_regions: int
       number of regions to divide into
+    :param center: bool (default is True)
+        If True every contour in the cycle is centered at the origin
+        otherwise, the translation differences between frames are left untouched
     :return: (n_regions) float array
     """
-    contour_points_time_polar = convert_to_polar(contour_points_time)
+    contour_points_time_polar = convert_to_polar(contour_points_time, center)
     regional_areas_time = get_regional_areas_time(contour_points_time_polar, n_regions)
     local_es = _get_local_ES(regional_areas_time)
     return local_es
@@ -401,7 +409,7 @@ def _get_local_EF(regional_areas_time):
     return local_ef
 
 
-def get_local_EF(contour_points_time, n_regions=20):
+def get_local_EF(contour_points_time, n_regions=20, center=True):
     """
     Finds the local ejection fraction (EF) in the LV regions.
     EF is defined as the ratio (end-diastolic volume - end-systolic volume) / (end-diastolic volume).
@@ -411,16 +419,19 @@ def get_local_EF(contour_points_time, n_regions=20):
       LV shape dynamics
     :param n_regions: int
       number of regions to divide into
+    :param center: bool (default is True)
+        If True every contour in the cycle is centered at the origin
+        otherwise, the translation differences between frames are left untouched
     :return: (n_regions) float array
       Local ejection fractions
     """
-    contour_points_time_polar = convert_to_polar(contour_points_time)
+    contour_points_time_polar = convert_to_polar(contour_points_time, center)
     regional_areas_time = get_regional_areas_time(contour_points_time_polar, n_regions)
     local_ef = _get_local_EF(regional_areas_time)
     return local_ef
 
 
-def get_spacial_heterogeneity_index(contour_points_time, n_regions=20, local_ef=None):
+def get_spacial_heterogeneity_index(contour_points_time, n_regions=20, center=True, local_ef=None):
     """
     Calculates spacial heterogeneity index (SHI) which is defined as the coefficient
     of variation of local ejection fractions in n_regions.
@@ -428,14 +439,20 @@ def get_spacial_heterogeneity_index(contour_points_time, n_regions=20, local_ef=
         LV shape dynamics
     :param n_regions: int
         number of regions to divide into
+    :param center: bool (default is True)
+        If True every contour in the cycle is centered at the origin
+        otherwise, the translation differences between frames are left untouched
+    :param local_ef: (n_regions,) float array (default is None)
+        If None it is calculated
+        Can be supplied to avoid repeating computations
     :return: float
     """
     if local_ef is None:
-        local_ef = get_local_EF(contour_points_time, n_regions)
-    return np.std(local_ef) / np.mean(local_ef)
+        local_ef = get_local_EF(contour_points_time, n_regions, center)
+    return np.std(local_ef, ddof=1) / np.mean(local_ef)
 
 
-def get_local_asynchronism_indexes(contour_points_time, end_systolic_id, n_regions=20):
+def get_local_asynchronism_indexes(contour_points_time, end_systolic_id, n_regions=20, center=True):
     """
     Calculates local asynchronism indexes for every region, defined as the ratio of local ES id to global ES id.
     :param contour_points_time: (time, n_points, 2) float array
@@ -443,15 +460,18 @@ def get_local_asynchronism_indexes(contour_points_time, end_systolic_id, n_regio
     :param end_systolic_id: the global end-systolic frame
     :param n_regions: int,
         number of regions to divide the shape into
+    :param center: bool (default is True)
+        If True every contour in the cycle is centered at the origin
+        otherwise, the translation differences between frames are left untouched
     :return: (n_regions,) float array
     """
-    local_es = get_local_ES(contour_points_time, n_regions)
+    local_es = get_local_ES(contour_points_time, n_regions, center)
     time_ratio = local_es / end_systolic_id
     return time_ratio
 
 
 def get_temporal_heterogeneity_index(
-        contour_points_time, end_systolic_id, n_regions=20, time_ratio=None
+        contour_points_time, end_systolic_id, n_regions=20, center=True, time_ratio=None
 ):
     """
     Calculates temporal heterogeneity index which is defined as the coefficient of variation
@@ -462,18 +482,24 @@ def get_temporal_heterogeneity_index(
         the global end-systolic frame
     :param n_regions: int,
         number of regions to divide the shape into
+    :param center: bool (default is True)
+        If True every contour in the cycle is centered at the origin
+        otherwise, the translation differences between frames are left untouched
+    :param time_ratio: (n_regions,) flaot array (default is None)
+        if None it is calculated from other parameters
+        can be supplied to avoid repeating computations
     :return: float
     """
     if time_ratio is None:
         time_ratio = get_local_asynchronism_indexes(contour_points_time, end_systolic_id, n_regions)
-    return np.std(time_ratio) / np.mean(time_ratio)
+    return np.std(time_ratio, ddof=1) / np.mean(time_ratio)
 
 
 def close_contour_flat(contour_points, n_points_cap=10):
     """
     Auxiliary function, adds a flat cap on the base of the LV, closing the shape
     :param contour_points: (n_points, 2) array, LV shape
-    :param n_points: int, number of points in the cap
+    :param n_points_cap: int, number of points in the cap
     :return: (n_points + n_points_cap, 2) array, closed LV shape
     """
     closure_points = np.linspace(contour_points[-1], contour_points[0], n_points_cap + 1)[1:]
